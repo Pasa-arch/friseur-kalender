@@ -235,8 +235,24 @@ window.editEvent=async id=>{
   start.value=data.start_time.slice(0,16); end.value=data.end_time.slice(0,16);
   editId=id;
 };
-window.deleteEvent=async id=>{
-  if(confirm("Löschen?")){ await sb.from("events").delete().eq("id",id); loadEvents(); }
+window.deleteEvent = async function (id) {
+  if (!confirm("Termin wirklich löschen?")) return;
+
+  console.log("Lösche ID:", id);
+
+  const { error } = await sb
+    .from("events")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    alert("Löschen fehlgeschlagen: " + error.message);
+    return;
+  }
+
+  loadEvents();
+};
+ }
 };
 
 loadEvents();
