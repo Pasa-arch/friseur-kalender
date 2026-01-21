@@ -1,44 +1,261 @@
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Friseur Kalender</title>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+<style>
+body { font-family: Arial; margin: 30px; }
+input, select, button { margin: 4px; padding: 4px; }
+
+table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+th, td { border: 1px solid #ccc; padding: 6px; }
+
+.overlap { background: #ffd0d0; }
+
+/* Tagesraster */
+#calendarGrid {
+  display: grid;
+  grid-template-columns: 80px repeat(4, 1fr);
+  border: 1px solid #aaa;
+  margin-top: 20px;
+}
+
+.time {
+  border-bottom: 1px solid #ddd;
+  padding: 4px;
+  font-size: 12px;
+}
+
+.cell {
+  border-left: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  min-height: 40px;
+  position: relative;
+}
+
+.event {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: #cce5ff;
+  border: 1px solid #6699cc;
+  font-size: 11px;
+  padding: 2px;
+  cursor: grab;
+}
+
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: #336699;
+  cursor: ns-resize;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Gemeinsamer Friseur-Kalender</h1>
+
+<form id="eventForm">
+  <select id="staff" required>
+    <option value="">Mitarbeiter</option>
+    <option>Soner</option>
+    <option>Gülcin</option>
+    <option>Kadir</option>
+    <option>Herrmann</option>
+  </select>
+  <input id="customer" placeholder="Kunde">
+  <input id="title" placeholder="Leistung" required>
+  <input type="datetime-local" id="start" required>
+  <input type="datetime-local" id="end" required>
+  <button>Speichern</button>
+</form>
+
+<div style="margin:10px 0;">
+  <button id="prevDay">◀</button>
+  <strong id="dayLabel"></strong>
+  <button id="nextDay">▶</button>
+</div>
+
+<table>
+<thead>
+<tr>
+  <th>MA</th><th>Kunde</th><th>Leistung</th><th>Start</th><th>Ende</th><th></th>
+</tr>
+</thead>
+<tbody id="list"></tbody>
+</table>
+
+<h2>Tages-Raster</h2>
+<div id="calendarGrid"></div>
+
 <script>
+/* SUPABASE */
 const sb = supabase.createClient(
   "https://vsswsckjvfeglbtealdg.supabase.co",
-  "DEIN_ANON_KEY_HIER"
+  "sb_publishable_dwQCSJ-LalgHObHxubryEA_7DNYOqcP"
 );
 
-const list = document.querySelector("tbody");
+const staffList = ["Soner","Gülcin","Kadir","Hermann"];
+const list = document.getElementById("list");
+const grid = document.getElementById("calendarGrid");
+let editId = null;
 
-async function loadEvents() {
-  const { data, error } = await sb
-    .from("events")
+/* TAG */
+let currentDay = new Date();
+currentDay.setHours(0,0,0,0);
+const dayLabel = document.getElementById("dayLabel");
+
+function updateDayLabel(){
+  dayLabel.textContent = currentDay.toLocaleDateString("de-DE",
+    {weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"});
+}
+updateDayLabel();
+
+prevDay.onclick = ()=>{ currentDay.setDate(currentDay.getDate()-1); updateDayLabel(); loadEvents(); };
+nextDay.onclick = ()=>{ currentDay.setDate(currentDay.getDate()+1); updateDayLabel(); loadEvents(); };
+
+/* LADEN */
+async function loadEvents(){
+  const start = new Date(currentDay);
+  const end = new Date(currentDay); end.setHours(23,59,59,999);
+
+  const { data } = await sb.from("events")
     .select("*")
+    .gte("start_time", start.toISOString())
+    .lte("start_time", end.toISOString())
     .order("start_time");
 
-  if (error) {
-    alert(error.message);
-    return;
-  }
+  renderTable(data);
+  renderGrid(data);
+}
 
-  list.innerHTML = "";
-  data.forEach(e => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
+/* TABELLE + KONFLIKT */
+function renderTable(data){
+  list.innerHTML="";
+  data.forEach(e=>{
+    const overlap = data.some(o =>
+      o.id!==e.id &&
+      new Date(e.start_time)<new Date(o.end_time) &&
+      new Date(e.end_time)>new Date(o.start_time)
+    );
+    const tr=document.createElement("tr");
+    if(overlap) tr.classList.add("overlap");
+    tr.innerHTML=`
       <td>${e.staff}</td>
-      <td>${e.customer || "-"}</td>
+      <td>${e.customer||"-"}</td>
       <td>${e.title}</td>
-      <td>${new Date(e.start_time).toLocaleString()}</td>
-      <td>${new Date(e.end_time).toLocaleString()}</td>
+      <td>${new Date(e.start_time).toLocaleTimeString()}</td>
+      <td>${new Date(e.end_time).toLocaleTimeString()}</td>
       <td>
-        <button onclick="del('${e.id}')">🗑</button>
-      </td>
-    `;
+        <button onclick="editEvent('${e.id}')">✏️</button>
+        <button onclick="deleteEvent('${e.id}')">🗑</button>
+      </td>`;
     list.appendChild(tr);
   });
 }
 
-async function del(id) {
-  await sb.from("events").delete().eq("id", id);
+/* RASTER + DRAG + RESIZE */
+function renderGrid(events){
+  grid.innerHTML="";
+  grid.appendChild(document.createElement("div"));
+  staffList.forEach(s=>{ const d=document.createElement("div"); d.textContent=s; d.style.fontWeight="bold"; grid.appendChild(d); });
+
+  for(let h=8;h<=20;h++){
+    const t=document.createElement("div"); t.className="time"; t.textContent=h+":00"; grid.appendChild(t);
+
+    staffList.forEach(s=>{
+      const cell=document.createElement("div"); cell.className="cell";
+      cell.ondragover=e=>e.preventDefault();
+      cell.ondrop=async e=>{
+        const id=e.dataTransfer.getData("id");
+        const ns=new Date(currentDay); ns.setHours(h,0,0,0);
+        const ne=new Date(ns); ne.setHours(h+1);
+        await sb.from("events").update({staff:s,start_time:ns,end_time:ne}).eq("id",id);
+        loadEvents();
+      };
+
+      events.filter(ev=>ev.staff===s && new Date(ev.start_time).getHours()===h)
+      .forEach(ev=>{
+        const el=document.createElement("div");
+        el.className="event"; el.textContent=ev.title; el.draggable=true;
+        el.ondragstart=e=>e.dataTransfer.setData("id",ev.id);
+
+        const rh=document.createElement("div");
+        rh.className="resize-handle";
+        rh.onmousedown=()=>startResize(ev.id,new Date(ev.end_time));
+        el.appendChild(rh);
+
+        cell.appendChild(el);
+      });
+      grid.appendChild(cell);
+    });
+  }
+}
+
+/* RESIZE */
+let resizeId=null,startEnd=null,startY=0;
+function startResize(id,end){
+  resizeId=id; startEnd=end; startY=event.clientY;
+  document.onmousemove=resizeMove;
+  document.onmouseup=stopResize;
+}
+function resizeMove(e){
+  if(!resizeId) return;
+  const steps=Math.round((e.clientY-startY)/20);
+  const ne=new Date(startEnd); ne.setMinutes(ne.getMinutes()+steps*30);
+  resizeNewEnd=ne;
+}
+async function stopResize(){
+  if(resizeId && resizeNewEnd){
+    await sb.from("events").update({end_time:resizeNewEnd}).eq("id",resizeId);
+  }
+  resizeId=null; document.onmousemove=null; document.onmouseup=null;
   loadEvents();
 }
 
+/* FORM */
+eventForm.onsubmit=async e=>{
+  e.preventDefault();
+  const ev={staff:staff.value,customer:customer.value,title:title.value,start_time:start.value,end_time:end.value};
+  editId ? await sb.from("events").update(ev).eq("id",editId) : await sb.from("events").insert([ev]);
+  editId=null; eventForm.reset(); loadEvents();
+};
+
+window.editEvent=async id=>{
+  const {data}=await sb.from("events").select("*").eq("id",id).single();
+  staff.value=data.staff; customer.value=data.customer||""; title.value=data.title;
+  start.value=data.start_time.slice(0,16); end.value=data.end_time.slice(0,16);
+  editId=id;
+};
+window.deleteEvent = async function (id) {
+  if (!confirm("Termin wirklich löschen?")) return;
+
+  console.log("Lösche ID:", id);
+
+  const { error } = await sb
+    .from("events")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    alert("Löschen fehlgeschlagen: " + error.message);
+    return;
+  }
+
+  loadEvents();
+};
+ }
+};
+
 loadEvents();
 </script>
+
+</body>
+</html>
