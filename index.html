@@ -8,12 +8,10 @@
 
 <style>
 body { font-family: Arial, sans-serif; margin: 30px; }
-input, select, button { margin: 4px; padding: 6px; }
-
+input, select, button { padding: 6px; margin: 4px; }
 table { border-collapse: collapse; width: 100%; margin-top: 20px; }
 th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-
-.overlap { background: #ffd0d0; }
+.actions button { margin-right: 4px; }
 </style>
 </head>
 
@@ -32,16 +30,13 @@ th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
 
   <input id="customer" placeholder="Kunde">
   <input id="title" placeholder="Leistung" required>
-
   <input type="datetime-local" id="start" required>
   <input type="datetime-local" id="end" required>
 
   <button type="submit">Speichern</button>
 </form>
 
-<hr>
-
-<div>
+<div style="margin:15px 0;">
   <button id="prevDay">◀</button>
   <strong id="dayLabel"></strong>
   <button id="nextDay">▶</button>
@@ -65,53 +60,50 @@ th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
 /* ================= SUPABASE ================= */
 const sb = supabase.createClient(
   "https://vsswsckjvfeglbtealdg.supabase.co",
-  "sb_publishable_dwQCSJ-LalgHObHxubryEA_7DNYOqcP"
+  "DEIN_PUBLISHABLE_KEY_HIER"
 );
 
-/* ================= STATE ================= */
-const list = document.getElementById("list");
-let editId = null;
-
-/* ================= TAG ================= */
+/* ================= STATUS ================= */
 let currentDay = new Date();
 currentDay.setHours(0,0,0,0);
+let editId = null;
 
+const list = document.getElementById("list");
 const dayLabel = document.getElementById("dayLabel");
 
-function updateDayLabel() {
+/* ================= DATUM ================= */
+function updateDayLabel(){
   dayLabel.textContent = currentDay.toLocaleDateString("de-DE", {
-    weekday: "long",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric"
+    weekday: "long", day: "2-digit", month: "2-digit", year: "numeric"
   });
 }
+updateDayLabel();
 
-document.getElementById("prevDay").onclick = () => {
+prevDay.onclick = () => {
   currentDay.setDate(currentDay.getDate() - 1);
   updateDayLabel();
   loadEvents();
 };
 
-document.getElementById("nextDay").onclick = () => {
+nextDay.onclick = () => {
   currentDay.setDate(currentDay.getDate() + 1);
   updateDayLabel();
   loadEvents();
 };
 
-updateDayLabel();
-
 /* ================= LADEN ================= */
-async function loadEvents() {
-  const start = new Date(currentDay);
-  const end = new Date(currentDay);
-  end.setHours(23,59,59,999);
+async function loadEvents(){
+  const startDay = new Date(currentDay);
+  startDay.setHours(0,0,0,0);
+
+  const endDay = new Date(currentDay);
+  endDay.setHours(23,59,59,999);
 
   const { data, error } = await sb
     .from("events")
     .select("*")
-    .gte("start_time", start.toISOString())
-    .lte("start_time", end.toISOString())
+    .gte("start_time", startDay.toISOString())
+    .lte("start_time", endDay.toISOString())
     .order("start_time");
 
   if (error) {
@@ -119,70 +111,68 @@ async function loadEvents() {
     return;
   }
 
-  renderTable(data);
+  renderTable(data || []);
 }
 
 /* ================= TABELLE ================= */
-function renderTable(data) {
+function renderTable(events){
   list.innerHTML = "";
 
-  data.forEach(e => {
+  events.forEach(e => {
     const tr = document.createElement("tr");
-
     tr.innerHTML = `
       <td>${e.staff}</td>
       <td>${e.customer || "-"}</td>
       <td>${e.title}</td>
-      <td>${new Date(e.start_time).toLocaleTimeString("de-DE", {hour:"2-digit",minute:"2-digit"})}</td>
-      <td>${new Date(e.end_time).toLocaleTimeString("de-DE", {hour:"2-digit",minute:"2-digit"})}</td>
-      <td>
+      <td>${new Date(e.start_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
+      <td>${new Date(e.end_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
+      <td class="actions">
         <button onclick="editEvent('${e.id}')">✏️</button>
         <button onclick="deleteEvent('${e.id}')">🗑</button>
       </td>
     `;
-
     list.appendChild(tr);
   });
 }
 
 /* ================= FORM ================= */
-document.getElementById("eventForm").onsubmit = async (e) => {
+eventForm.onsubmit = async e => {
   e.preventDefault();
 
-  const ev = {
-    staff: staff.value,
-    customer: customer.value || null,
-    title: title.value,
-    start_time: start.value.replace("T"," ") + ":00",
-    end_time: end.value.replace("T"," ") + ":00"
-  };
+  const startDate = new Date(start.value);
+  const endDate = new Date(end.value);
 
-  const res = editId
-    ? await sb.from("events").update(ev).eq("id", editId)
-    : await sb.from("events").insert([ev]);
-
-  if (res.error) {
-    alert(res.error.message);
+  if (endDate <= startDate) {
+    alert("Ende muss nach Start liegen");
     return;
   }
 
+  currentDay = new Date(startDate);
+  currentDay.setHours(0,0,0,0);
+  updateDayLabel();
+
+  const ev = {
+    staff: staff.value,
+    customer: customer.value,
+    title: title.value,
+    start_time: startDate.toISOString(),
+    end_time: endDate.toISOString()
+  };
+
+  if (editId) {
+    await sb.from("events").update(ev).eq("id", editId);
+  } else {
+    await sb.from("events").insert([ev]);
+  }
+
   editId = null;
-  e.target.reset();
+  eventForm.reset();
   loadEvents();
 };
 
 /* ================= EDIT ================= */
-window.editEvent = async (id) => {
-  const { data, error } = await sb
-    .from("events")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    alert(error.message);
-    return;
-  }
+window.editEvent = async id => {
+  const { data } = await sb.from("events").select("*").eq("id", id).single();
 
   staff.value = data.staff;
   customer.value = data.customer || "";
@@ -194,14 +184,10 @@ window.editEvent = async (id) => {
 };
 
 /* ================= DELETE ================= */
-window.deleteEvent = async (id) => {
+window.deleteEvent = async id => {
   if (!confirm("Termin wirklich löschen?")) return;
 
-  const { error } = await sb
-    .from("events")
-    .delete()
-    .eq("id", id);
-
+  const { error } = await sb.from("events").delete().eq("id", id);
   if (error) {
     alert(error.message);
     return;
@@ -210,7 +196,7 @@ window.deleteEvent = async (id) => {
   loadEvents();
 };
 
-/* ================= START ================= */
+/* START */
 loadEvents();
 </script>
 
