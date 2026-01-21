@@ -136,39 +136,35 @@ function renderTable(events){
 }
 
 /* ================= FORM ================= */
-eventForm.onsubmit = async e => {
+eventForm.onsubmit = async (e) => {
   e.preventDefault();
 
-  const startDate = new Date(start.value);
-  const endDate = new Date(end.value);
+  const startTime = new Date(currentDay);
+  const endTime = new Date(currentDay);
 
-  if (endDate <= startDate) {
-    alert("Ende muss nach Start liegen");
-    return;
-  }
+  const [sh, sm] = start.value.split(":");
+  const [eh, em] = end.value.split(":");
 
-  currentDay = new Date(startDate);
-  currentDay.setHours(0,0,0,0);
-  updateDayLabel();
+  startTime.setHours(sh, sm, 0, 0);
+  endTime.setHours(eh, em, 0, 0);
 
   const ev = {
     staff: staff.value,
     customer: customer.value,
     title: title.value,
-    start_time: startDate.toISOString(),
-    end_time: endDate.toISOString()
+    start_time: startTime.toISOString(),
+    end_time: endTime.toISOString()
   };
 
-  if (editId) {
-    await sb.from("events").update(ev).eq("id", editId);
-  } else {
-    await sb.from("events").insert([ev]);
-  }
+  editId
+    ? await sb.from("events").update(ev).eq("id", editId)
+    : await sb.from("events").insert([ev]);
 
   editId = null;
   eventForm.reset();
   loadEvents();
 };
+
 
 /* ================= EDIT ================= */
 window.editEvent = async id => {
@@ -202,3 +198,4 @@ loadEvents();
 
 </body>
 </html>
+
