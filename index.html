@@ -4,199 +4,123 @@
 <meta charset="UTF-8">
 <title>Friseur Kalender</title>
 
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<!-- FullCalendar -->
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
 
 <style>
-body { font-family: Arial, sans-serif; margin: 30px; }
-input, select, button { padding: 6px; margin: 4px; }
-table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-.actions button { margin-right: 4px; }
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+}
+
+#calendar {
+  max-width: 1200px;
+  margin: auto;
+}
+
+.fc-event-title {
+  font-weight: bold;
+}
+
+.fc-toolbar-title {
+  font-size: 20px;
+}
 </style>
 </head>
 
 <body>
 
-<h1>Gemeinsamer Friseur-Kalender</h1>
+<h2>Friseur-Kalender (intern)</h2>
 
-<form id="eventForm">
-  <select id="staff" required>
-    <option value="">Mitarbeiter</option>
-    <option>Soner</option>
-    <option>Gülcin</option>
-    <option>Kadir</option>
-    <option>Herrmann</option>
-  </select>
-
-  <input id="customer" placeholder="Kunde">
-  <input id="title" placeholder="Leistung" required>
-  <input type="datetime-local" id="start" required>
-  <input type="datetime-local" id="end" required>
-
-  <button type="submit">Speichern</button>
-</form>
-
-<div style="margin:15px 0;">
-  <button id="prevDay">◀</button>
-  <strong id="dayLabel"></strong>
-  <button id="nextDay">▶</button>
-</div>
-
-<table>
-<thead>
-<tr>
-  <th>Mitarbeiter</th>
-  <th>Kunde</th>
-  <th>Leistung</th>
-  <th>Start</th>
-  <th>Ende</th>
-  <th>Aktion</th>
-</tr>
-</thead>
-<tbody id="list"></tbody>
-</table>
+<div id="calendar"></div>
 
 <script>
-/* ================= SUPABASE ================= */
-const sb = supabase.createClient(
-  "https://vsswsckjvfeglbtealdg.supabase.co",
-  "sb_publishable_dwQCSJ-LalgHObHxubryEA_7DNYOqcP"
-);
+document.addEventListener("DOMContentLoaded", function () {
 
-/* ================= STATUS ================= */
-let currentDay = new Date();
-currentDay.setHours(0,0,0,0);
-let editId = null;
+  const staffMembers = ["Herrmann", "Soner", "Gülcin", "Kadir"];
 
-const list = document.getElementById("list");
-const dayLabel = document.getElementById("dayLabel");
+  const calendarEl = document.getElementById("calendar");
 
-/* ================= DATUM ================= */
-function updateDayLabel(){
-  dayLabel.textContent = currentDay.toLocaleDateString("de-DE", {
-    weekday: "long", day: "2-digit", month: "2-digit", year: "numeric"
+  const calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: "timeGridWeek",
+    locale: "de",
+    editable: true,
+    selectable: true,
+    nowIndicator: true,
+    slotMinTime: "08:00:00",
+    slotMaxTime: "20:00:00",
+    headerToolbar: {
+      left: "prev,next today",
+      center: "title",
+      right: "timeGridDay,timeGridWeek"
+    },
+
+    events: loadEvents(),
+
+    select: function (info) {
+      const staff = prompt(
+        "Mitarbeiter:\n" + staffMembers.join(", ")
+      );
+      if (!staffMembers.includes(staff)) {
+        alert("Ungültiger Mitarbeiter");
+        return;
+      }
+
+      const customer = prompt("Kundenname:");
+      if (!customer) return;
+
+      const service = prompt("Leistung:");
+      if (!service) return;
+
+      const event = {
+        id: crypto.randomUUID(),
+        title: `${staff} – ${customer} (${service})`,
+        start: info.startStr,
+        end: info.endStr,
+        extendedProps: { staff, customer, service }
+      };
+
+      calendar.addEvent(event);
+      saveEvents(calendar.getEvents());
+    },
+
+    eventClick: function (info) {
+      if (!confirm("Termin löschen?")) return;
+      info.event.remove();
+      saveEvents(calendar.getEvents());
+    },
+
+    eventDrop: function () {
+      saveEvents(calendar.getEvents());
+    },
+
+    eventResize: function () {
+      saveEvents(calendar.getEvents());
+    }
   });
-}
-updateDayLabel();
 
-prevDay.onclick = () => {
-  currentDay.setDate(currentDay.getDate() - 1);
-  updateDayLabel();
-  loadEvents();
-};
+  calendar.render();
 
-nextDay.onclick = () => {
-  currentDay.setDate(currentDay.getDate() + 1);
-  updateDayLabel();
-  loadEvents();
-};
+  /* ====== LocalStorage ====== */
 
-/* ================= LADEN ================= */
-async function loadEvents(){
-  const startDay = new Date(currentDay);
-  startDay.setHours(0,0,0,0);
-
-  const endDay = new Date(currentDay);
-  endDay.setHours(23,59,59,999);
-
-  const { data, error } = await sb
-    .from("events")
-    .select("*")
-    .gte("start_time", startDay.toISOString())
-    .lte("start_time", endDay.toISOString())
-    .order("start_time");
-
-  if (error) {
-    alert(error.message);
-    return;
+  function saveEvents(events) {
+    const data = events.map(e => ({
+      id: e.id,
+      title: e.title,
+      start: e.start,
+      end: e.end,
+      extendedProps: e.extendedProps
+    }));
+    localStorage.setItem("calendarEvents", JSON.stringify(data));
   }
 
-  renderTable(data || []);
-}
-
-/* ================= TABELLE ================= */
-function renderTable(events){
-  list.innerHTML = "";
-
-  events.forEach(e => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${e.staff}</td>
-      <td>${e.customer || "-"}</td>
-      <td>${e.title}</td>
-      <td>${new Date(e.start_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
-      <td>${new Date(e.end_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
-      <td class="actions">
-        <button onclick="editEvent('${e.id}')">✏️</button>
-        <button onclick="deleteEvent('${e.id}')">🗑</button>
-      </td>
-    `;
-    list.appendChild(tr);
-  });
-}
-
-/* ================= FORM ================= */
-eventForm.onsubmit = async (e) => {
-  e.preventDefault();
-
-  const startTime = new Date(currentDay);
-  const endTime = new Date(currentDay);
-
-  const [sh, sm] = start.value.split(":");
-  const [eh, em] = end.value.split(":");
-
-  startTime.setHours(sh, sm, 0, 0);
-  endTime.setHours(eh, em, 0, 0);
-
-  const ev = {
-    staff: staff.value,
-    customer: customer.value,
-    title: title.value,
-    start_time: startTime.toISOString(),
-    end_time: endTime.toISOString()
-  };
-
-  editId
-    ? await sb.from("events").update(ev).eq("id", editId)
-    : await sb.from("events").insert([ev]);
-
-  editId = null;
-  eventForm.reset();
-  loadEvents();
-};
-
-
-/* ================= EDIT ================= */
-window.editEvent = async id => {
-  const { data } = await sb.from("events").select("*").eq("id", id).single();
-
-  staff.value = data.staff;
-  customer.value = data.customer || "";
-  title.value = data.title;
-  start.value = data.start_time.slice(0,16);
-  end.value = data.end_time.slice(0,16);
-
-  editId = id;
-};
-
-/* ================= DELETE ================= */
-window.deleteEvent = async id => {
-  if (!confirm("Termin wirklich löschen?")) return;
-
-  const { error } = await sb.from("events").delete().eq("id", id);
-  if (error) {
-    alert(error.message);
-    return;
+  function loadEvents() {
+    return JSON.parse(localStorage.getItem("calendarEvents") || "[]");
   }
 
-  loadEvents();
-};
-
-/* START */
-loadEvents();
+});
 </script>
 
 </body>
 </html>
-
-
